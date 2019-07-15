@@ -1,14 +1,15 @@
+use crate::sysbus::SysBus;
 use crate::arm7tdmi::bus::Bus;
 use crate::arm7tdmi::cpu::{Core, CpuExecResult, CpuPipelineAction};
 use crate::arm7tdmi::*;
 
 use super::*;
-fn push(cpu: &mut Core, bus: &mut Bus, r: usize) {
+fn push(cpu: &mut Core, bus: &mut SysBus, r: usize) {
     cpu.gpr[REG_SP] -= 4;
     let stack_addr = cpu.gpr[REG_SP];
     cpu.store_32(stack_addr, cpu.get_reg(r), bus)
 }
-fn pop(cpu: &mut Core, bus: &mut Bus, r: usize) {
+fn pop(cpu: &mut Core, bus: &mut SysBus, r: usize) {
     let stack_addr = cpu.gpr[REG_SP];
     let val = cpu.load_32(stack_addr, bus);
     cpu.set_reg(r, val);
@@ -18,7 +19,7 @@ fn pop(cpu: &mut Core, bus: &mut Bus, r: usize) {
 impl Core {
     fn exec_thumb_move_shifted_reg(
         &mut self,
-        _bus: &mut Bus,
+        _bus: &mut SysBus,
         insn: ThumbInstruction,
     ) -> CpuExecResult {
         let op2 = self
@@ -38,7 +39,7 @@ impl Core {
         Ok(CpuPipelineAction::IncPC)
     }
 
-    fn exec_thumb_add_sub(&mut self, _bus: &mut Bus, insn: ThumbInstruction) -> CpuExecResult {
+    fn exec_thumb_add_sub(&mut self, _bus: &mut SysBus, insn: ThumbInstruction) -> CpuExecResult {
         let op1 = self.get_reg(insn.rs()) as i32;
         let op2 = if insn.is_immediate_operand() {
             insn.rn() as u32 as i32
@@ -61,7 +62,7 @@ impl Core {
 
     fn exec_thumb_data_process_imm(
         &mut self,
-        _bus: &mut Bus,
+        _bus: &mut SysBus,
         insn: ThumbInstruction,
     ) -> CpuExecResult {
         let arm_alu_op: AluOpCode = insn.format3_op().into();
@@ -75,7 +76,7 @@ impl Core {
         Ok(CpuPipelineAction::IncPC)
     }
 
-    fn exec_thumb_mul(&mut self, _bus: &mut Bus, insn: ThumbInstruction) -> CpuExecResult {
+    fn exec_thumb_mul(&mut self, _bus: &mut SysBus, insn: ThumbInstruction) -> CpuExecResult {
         let op1 = self.get_reg(insn.rd()) as i32;
         let op2 = self.get_reg(insn.rs()) as i32;
         let m = self.get_required_multipiler_array_cycles(op2);
@@ -86,7 +87,7 @@ impl Core {
         Ok(CpuPipelineAction::IncPC)
     }
 
-    fn exec_thumb_alu_ops(&mut self, _bus: &mut Bus, insn: ThumbInstruction) -> CpuExecResult {
+    fn exec_thumb_alu_ops(&mut self, _bus: &mut SysBus, insn: ThumbInstruction) -> CpuExecResult {
         let rd = insn.rd();
 
         let (arm_alu_op, shft) = insn.alu_opcode();
@@ -106,7 +107,7 @@ impl Core {
     }
 
     /// Cycles 2S+1N
-    fn exec_thumb_bx(&mut self, _bus: &mut Bus, insn: ThumbInstruction) -> CpuExecResult {
+    fn exec_thumb_bx(&mut self, _bus: &mut SysBus, insn: ThumbInstruction) -> CpuExecResult {
         let src_reg = if insn.flag(ThumbInstruction::FLAG_H2) {
             insn.rs() + 8
         } else {
@@ -117,7 +118,7 @@ impl Core {
 
     fn exec_thumb_hi_reg_op_or_bx(
         &mut self,
-        bus: &mut Bus,
+        bus: &mut SysBus,
         insn: ThumbInstruction,
     ) -> CpuExecResult {
         if OpFormat5::BX == insn.format5_op() {
@@ -148,7 +149,7 @@ impl Core {
         }
     }
 
-    fn exec_thumb_ldr_pc(&mut self, bus: &mut Bus, insn: ThumbInstruction) -> CpuExecResult {
+    fn exec_thumb_ldr_pc(&mut self, bus: &mut SysBus, insn: ThumbInstruction) -> CpuExecResult {
         let addr = (insn.pc & !0b10) + 4 + (insn.word8() as Addr);
         let data = self.load_32(addr, bus);
 
@@ -161,7 +162,7 @@ impl Core {
 
     fn do_exec_thumb_ldr_str(
         &mut self,
-        bus: &mut Bus,
+        bus: &mut SysBus,
         insn: ThumbInstruction,
         addr: Addr,
     ) -> CpuExecResult {
@@ -190,7 +191,7 @@ impl Core {
 
     fn exec_thumb_ldr_str_reg_offset(
         &mut self,
-        bus: &mut Bus,
+        bus: &mut SysBus,
         insn: ThumbInstruction,
     ) -> CpuExecResult {
         let addr = self
@@ -199,7 +200,7 @@ impl Core {
         self.do_exec_thumb_ldr_str(bus, insn, addr)
     }
 
-    fn exec_thumb_ldr_str_shb(&mut self, bus: &mut Bus, insn: ThumbInstruction) -> CpuExecResult {
+    fn exec_thumb_ldr_str_shb(&mut self, bus: &mut SysBus, insn: ThumbInstruction) -> CpuExecResult {
         let addr = self
             .get_reg(insn.rb())
             .wrapping_add(self.get_reg(insn.ro()));
@@ -237,7 +238,7 @@ impl Core {
 
     fn exec_thumb_ldr_str_imm_offset(
         &mut self,
-        bus: &mut Bus,
+        bus: &mut SysBus,
         insn: ThumbInstruction,
     ) -> CpuExecResult {
         let offset = if insn.is_transferring_bytes() {
@@ -251,7 +252,7 @@ impl Core {
 
     fn exec_thumb_ldr_str_halfword(
         &mut self,
-        bus: &mut Bus,
+        bus: &mut SysBus,
         insn: ThumbInstruction,
     ) -> CpuExecResult {
         let base = self.gpr[insn.rb()] as i32;
@@ -266,12 +267,12 @@ impl Core {
         Ok(CpuPipelineAction::IncPC)
     }
 
-    fn exec_thumb_ldr_str_sp(&mut self, bus: &mut Bus, insn: ThumbInstruction) -> CpuExecResult {
+    fn exec_thumb_ldr_str_sp(&mut self, bus: &mut SysBus, insn: ThumbInstruction) -> CpuExecResult {
         let addr = self.gpr[REG_SP] + (insn.word8() as Addr);
         self.do_exec_thumb_ldr_str_with_addr(bus, insn, addr)
     }
 
-    fn exec_thumb_load_address(&mut self, _bus: &mut Bus, insn: ThumbInstruction) -> CpuExecResult {
+    fn exec_thumb_load_address(&mut self, _bus: &mut SysBus, insn: ThumbInstruction) -> CpuExecResult {
         let result = if insn.flag(ThumbInstruction::FLAG_SP) {
             self.gpr[REG_SP] + (insn.word8() as Addr)
         } else {
@@ -284,7 +285,7 @@ impl Core {
 
     fn do_exec_thumb_ldr_str_with_addr(
         &mut self,
-        bus: &mut Bus,
+        bus: &mut SysBus,
         insn: ThumbInstruction,
         addr: Addr,
     ) -> CpuExecResult {
@@ -298,7 +299,7 @@ impl Core {
         Ok(CpuPipelineAction::IncPC)
     }
 
-    fn exec_thumb_add_sp(&mut self, _bus: &mut Bus, insn: ThumbInstruction) -> CpuExecResult {
+    fn exec_thumb_add_sp(&mut self, _bus: &mut SysBus, insn: ThumbInstruction) -> CpuExecResult {
         let op1 = self.gpr[REG_SP] as i32;
         let op2 = insn.sword7();
         let arm_alu_op = AluOpCode::ADD;
@@ -311,7 +312,7 @@ impl Core {
         Ok(CpuPipelineAction::IncPC)
     }
 
-    fn exec_thumb_push_pop(&mut self, bus: &mut Bus, insn: ThumbInstruction) -> CpuExecResult {
+    fn exec_thumb_push_pop(&mut self, bus: &mut SysBus, insn: ThumbInstruction) -> CpuExecResult {
         // (From GBATEK) Execution Time: nS+1N+1I (POP), (n+1)S+2N+1I (POP PC), or (n-1)S+2N (PUSH).
 
         let is_pop = insn.is_load();
@@ -341,7 +342,7 @@ impl Core {
         Ok(pipeline_action)
     }
 
-    fn exec_thumb_ldm_stm(&mut self, bus: &mut Bus, insn: ThumbInstruction) -> CpuExecResult {
+    fn exec_thumb_ldm_stm(&mut self, bus: &mut SysBus, insn: ThumbInstruction) -> CpuExecResult {
         // (From GBATEK) Execution Time: nS+1N+1I (POP), (n+1)S+2N+1I (POP PC), or (n-1)S+2N (PUSH).
 
         let is_load = insn.is_load();
@@ -370,7 +371,7 @@ impl Core {
 
     fn exec_thumb_branch_with_cond(
         &mut self,
-        _bus: &mut Bus,
+        _bus: &mut SysBus,
         insn: ThumbInstruction,
     ) -> CpuExecResult {
         if !self.check_arm_cond(insn.cond()) {
@@ -382,7 +383,7 @@ impl Core {
         }
     }
 
-    fn exec_thumb_branch(&mut self, _bus: &mut Bus, insn: ThumbInstruction) -> CpuExecResult {
+    fn exec_thumb_branch(&mut self, _bus: &mut SysBus, insn: ThumbInstruction) -> CpuExecResult {
         let offset = ((insn.offset11() << 21) >> 20) as i32;
         self.pc = (self.pc as i32).wrapping_add(offset) as u32;
         Ok(CpuPipelineAction::Flush)
@@ -390,7 +391,7 @@ impl Core {
 
     fn exec_thumb_branch_long_with_link(
         &mut self,
-        _bus: &mut Bus,
+        _bus: &mut SysBus,
         insn: ThumbInstruction,
     ) -> CpuExecResult {
         let mut off = insn.offset11();
@@ -409,7 +410,7 @@ impl Core {
         }
     }
 
-    pub fn exec_thumb(&mut self, bus: &mut Bus, insn: ThumbInstruction) -> CpuExecResult {
+    pub fn exec_thumb(&mut self, bus: &mut SysBus, insn: ThumbInstruction) -> CpuExecResult {
         match insn.fmt {
             ThumbFormat::MoveShiftedReg => self.exec_thumb_move_shifted_reg(bus, insn),
             ThumbFormat::AddSub => self.exec_thumb_add_sub(bus, insn),

@@ -22,3 +22,7 @@ time = "0.1.42"
 [profile.dev]
 opt-level = 1
 debug = true
+
+[profile.release]
+debug = true
+lto = false

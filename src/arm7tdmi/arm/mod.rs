@@ -111,14 +111,7 @@ impl InstructionDecoder for ArmInstruction {
     fn decode(raw: u32, addr: Addr) -> Result<Self, InstructionDecoderError> {
         use ArmFormat::*;
         let cond_code = raw.bit_range(28..32) as u8;
-        let cond = match ArmCond::from_u8(cond_code) {
-            Some(cond) => Ok(cond),
-            None => Err(ArmDecodeError::new(
-                UndefinedConditionCode(cond_code as u32),
-                raw,
-                addr,
-            )),
-        }?;
+        let cond = ArmCond::from_u8(cond_code).unwrap();
 
         let fmt = if (0x0fff_fff0 & raw) == 0x012f_ff10 {
             Ok(BX)

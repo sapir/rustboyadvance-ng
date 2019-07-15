@@ -61,5 +61,6 @@ pub trait Bus {
     fn get_bytes_mut(&mut self, addr: Addr) -> &mut [u8];
 
     /// returns the number of cycles needed for this memory access
+    #[inline(always)]
     fn get_cycles(&self, addr: Addr, access: MemoryAccess) -> usize;
 }

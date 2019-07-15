@@ -1,5 +1,6 @@
 use crate::bit::BitIndex;
 
+use crate::sysbus::SysBus;
 use crate::arm7tdmi::alu::*;
 use crate::arm7tdmi::bus::Bus;
 use crate::arm7tdmi::cpu::{Core, CpuExecResult, CpuPipelineAction};
@@ -10,7 +11,7 @@ use crate::arm7tdmi::{Addr, CpuError, CpuMode, CpuResult, CpuState, DecodedInstr
 use super::*;
 
 impl Core {
-    pub fn exec_arm(&mut self, bus: &mut Bus, insn: ArmInstruction) -> CpuExecResult {
+    pub fn exec_arm(&mut self, bus: &mut SysBus, insn: ArmInstruction) -> CpuExecResult {
         if !self.check_arm_cond(insn.cond) {
             return Ok(CpuPipelineAction::IncPC);
         }
@@ -37,7 +38,7 @@ impl Core {
     }
 
     /// Cycles 2S+1N
-    fn exec_b_bl(&mut self, _bus: &mut Bus, insn: ArmInstruction) -> CpuExecResult {
+    fn exec_b_bl(&mut self, _bus: &mut SysBus, insn: ArmInstruction) -> CpuExecResult {
         if insn.link_flag() {
             self.set_reg(14, (insn.pc + (self.word_size() as u32)) & !0b1);
         }
@@ -62,16 +63,16 @@ impl Core {
     }
 
     /// Cycles 2S+1N
-    fn exec_bx(&mut self, _bus: &mut Bus, insn: ArmInstruction) -> CpuExecResult {
+    fn exec_bx(&mut self, _bus: &mut SysBus, insn: ArmInstruction) -> CpuExecResult {
         self.branch_exchange(self.get_reg(insn.rn()))
     }
 
-    fn exec_swi(&mut self, _bus: &mut Bus, _insn: ArmInstruction) -> CpuExecResult {
+    fn exec_swi(&mut self, _bus: &mut SysBus, _insn: ArmInstruction) -> CpuExecResult {
         self.exception(Exception::SoftwareInterrupt);
         Ok(CpuPipelineAction::Flush)
     }
 
-    fn exec_mrs(&mut self, _bus: &mut Bus, insn: ArmInstruction) -> CpuExecResult {
+    fn exec_mrs(&mut self, _bus: &mut SysBus, insn: ArmInstruction) -> CpuExecResult {
         let mode = self.cpsr.mode();
         let result = if insn.spsr_flag() {
             if let Some(index) = mode.spsr_index() {
@@ -86,7 +87,7 @@ impl Core {
         Ok(CpuPipelineAction::IncPC)
     }
 
-    fn exec_msr_reg(&mut self, _bus: &mut Bus, insn: ArmInstruction) -> CpuExecResult {
+    fn exec_msr_reg(&mut self, _bus: &mut SysBus, insn: ArmInstruction) -> CpuExecResult {
         self.exec_msr(insn, self.get_reg(insn.rm()))
     }
 
@@ -108,7 +109,7 @@ impl Core {
         Ok(CpuPipelineAction::IncPC)
     }
 
-    fn exec_msr_flags(&mut self, _bus: &mut Bus, insn: ArmInstruction) -> CpuExecResult {
+    fn exec_msr_flags(&mut self, _bus: &mut SysBus, insn: ArmInstruction) -> CpuExecResult {
         let op = insn.operand2()?;
         let op = self.decode_operand2(op, false)?;
 
@@ -152,7 +153,7 @@ impl Core {
     ///
     /// Cycles: 1S+x+y (from GBATEK)
     ///         Add x=1I cycles if Op2 shifted-by-register. Add y=1S+1N cycles if Rd=R15.
-    fn exec_data_processing(&mut self, _bus: &mut Bus, insn: ArmInstruction) -> CpuExecResult {
+    fn exec_data_processing(&mut self, _bus: &mut SysBus, insn: ArmInstruction) -> CpuExecResult {
         // TODO handle carry flag
 
         let mut pipeline_action = CpuPipelineAction::IncPC;
@@ -200,7 +201,7 @@ impl Core {
     /// STR{cond}{B}{T} Rd,<Address>    | 2N            | ----  |  [Rn+/-<offset>]=Rd
     /// ------------------------------------------------------------------------------
     /// For LDR, add y=1S+1N if Rd=R15.
-    fn exec_ldr_str(&mut self, bus: &mut Bus, insn: ArmInstruction) -> CpuExecResult {
+    fn exec_ldr_str(&mut self, bus: &mut SysBus, insn: ArmInstruction) -> CpuExecResult {
         let mut writeback = insn.write_back_flag();
 
         if writeback && insn.rd() == insn.rn() {
@@ -258,7 +259,7 @@ impl Core {
         Ok(pipeline_action)
     }
 
-    fn exec_ldr_str_hs(&mut self, bus: &mut Bus, insn: ArmInstruction) -> CpuExecResult {
+    fn exec_ldr_str_hs(&mut self, bus: &mut SysBus, insn: ArmInstruction) -> CpuExecResult {
         let mut writeback = insn.write_back_flag();
         if writeback && insn.rd() == insn.rn() {
             return Err(CpuError::IllegalInstruction);
@@ -320,7 +321,7 @@ impl Core {
         Ok(pipeline_action)
     }
 
-    fn exec_ldm_stm(&mut self, bus: &mut Bus, insn: ArmInstruction) -> CpuExecResult {
+    fn exec_ldm_stm(&mut self, bus: &mut SysBus, insn: ArmInstruction) -> CpuExecResult {
         let full = insn.pre_index_flag();
         let ascending = insn.add_offset_flag();
         let psr_user = insn.psr_and_force_user_flag();
@@ -390,7 +391,7 @@ impl Core {
         Ok(pipeline_action)
     }
 
-    fn exec_mul_mla(&mut self, bus: &mut Bus, insn: ArmInstruction) -> CpuExecResult {
+    fn exec_mul_mla(&mut self, bus: &mut SysBus, insn: ArmInstruction) -> CpuExecResult {
         let (rd, rn, rs, rm) = (insn.rd(), insn.rn(), insn.rs(), insn.rm());
 
         // check validity
@@ -425,7 +426,7 @@ impl Core {
         Ok(CpuPipelineAction::IncPC)
     }
 
-    fn exec_mull_mlal(&mut self, bus: &mut Bus, insn: ArmInstruction) -> CpuExecResult {
+    fn exec_mull_mlal(&mut self, bus: &mut SysBus, insn: ArmInstruction) -> CpuExecResult {
         let (rd_hi, rd_lo, rn, rs, rm) =
             (insn.rd_hi(), insn.rd_lo(), insn.rn(), insn.rs(), insn.rm());
 

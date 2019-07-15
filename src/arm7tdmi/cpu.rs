@@ -3,6 +3,7 @@ use std::fmt;
 use ansi_term::{Colour, Style};
 use num_traits::Num;
 
+use crate::sysbus::SysBus;
 pub use super::exception::Exception;
 use super::{
     arm::*,
@@ -187,7 +188,7 @@ impl Core {
         self.cycles += 1;
     }
 
-    pub fn add_cycles(&mut self, addr: Addr, bus: &Bus, access: MemoryAccess) {
+    pub fn add_cycles(&mut self, addr: Addr, bus: &SysBus, access: MemoryAccess) {
         // println!("<cycle {:#x} {}> total: {}", addr, access, self.cycles);
         self.cycles += bus.get_cycles(addr, access);
     }
@@ -212,41 +213,41 @@ impl Core {
         }
     }
 
-    pub fn load_32(&mut self, addr: Addr, bus: &mut Bus) -> u32 {
+    pub fn load_32(&mut self, addr: Addr, bus: &mut SysBus) -> u32 {
         self.add_cycles(addr, bus, self.cycle_type(addr) + MemoryAccess32);
         self.memreq = addr;
         bus.read_32(addr)
     }
 
-    pub fn load_16(&mut self, addr: Addr, bus: &mut Bus) -> u16 {
+    pub fn load_16(&mut self, addr: Addr, bus: &mut SysBus) -> u16 {
         let cycle_type = self.cycle_type(addr);
         self.add_cycles(addr, bus, cycle_type + MemoryAccess16);
         self.memreq = addr;
         bus.read_16(addr)
     }
 
-    pub fn load_8(&mut self, addr: Addr, bus: &mut Bus) -> u8 {
+    pub fn load_8(&mut self, addr: Addr, bus: &mut SysBus) -> u8 {
         let cycle_type = self.cycle_type(addr);
         self.add_cycles(addr, bus, cycle_type + MemoryAccess8);
         self.memreq = addr;
         bus.read_8(addr)
     }
 
-    pub fn store_32(&mut self, addr: Addr, value: u32, bus: &mut Bus) {
+    pub fn store_32(&mut self, addr: Addr, value: u32, bus: &mut SysBus) {
         let cycle_type = self.cycle_type(addr);
         self.add_cycles(addr, bus, cycle_type + MemoryAccess32);
         self.memreq = addr;
         bus.write_32(addr, value);
     }
 
-    pub fn store_16(&mut self, addr: Addr, value: u16, bus: &mut Bus) {
+    pub fn store_16(&mut self, addr: Addr, value: u16, bus: &mut SysBus) {
         let cycle_type = self.cycle_type(addr);
         self.add_cycles(addr, bus, cycle_type + MemoryAccess16);
         self.memreq = addr;
         bus.write_16(addr, value);
     }
 
-    pub fn store_8(&mut self, addr: Addr, value: u8, bus: &mut Bus) {
+    pub fn store_8(&mut self, addr: Addr, value: u8, bus: &mut SysBus) {
         let cycle_type = self.cycle_type(addr);
         self.add_cycles(addr, bus, cycle_type + MemoryAccess8);
         self.memreq = addr;
@@ -276,7 +277,7 @@ impl Core {
 
     fn step_thumb(
         &mut self,
-        bus: &mut Bus,
+        bus: &mut SysBus,
     ) -> CpuResult<(Option<DecodedInstruction>, CpuPipelineAction)> {
         // fetch
         // let new_fetched = bus.read_16(self.pc);
@@ -311,7 +312,7 @@ impl Core {
 
     fn step_arm(
         &mut self,
-        bus: &mut Bus,
+        bus: &mut SysBus,
     ) -> CpuResult<(Option<DecodedInstruction>, CpuPipelineAction)> {
         // let new_fetched = bus.read_32(self.pc);
         let new_fetched = self.load_32(self.pc, bus);
@@ -345,7 +346,7 @@ impl Core {
 
     /// Perform a pipeline step
     /// If an instruction was executed in this step, return it.
-    pub fn step(&mut self, bus: &mut Bus) -> CpuResult<Option<DecodedInstruction>> {
+    pub fn step(&mut self, bus: &mut SysBus) -> CpuResult<Option<DecodedInstruction>> {
         let (executed_instruction, pipeline_action) = match self.cpsr.state() {
             CpuState::ARM => self.step_arm(bus),
             CpuState::THUMB => self.step_thumb(bus),
@@ -393,7 +394,7 @@ impl Core {
     /// A step that returns only once an instruction was executed.
     /// Returns the address of PC before executing an instruction,
     /// and the address of the next instruction to be executed;
-    pub fn step_one(&mut self, bus: &mut Bus) -> CpuResult<DecodedInstruction> {
+    pub fn step_one(&mut self, bus: &mut SysBus) -> CpuResult<DecodedInstruction> {
         loop {
             if let Some(i) = self.step(bus)? {
                 return Ok(i);
