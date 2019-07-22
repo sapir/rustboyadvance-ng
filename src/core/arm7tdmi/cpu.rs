@@ -41,6 +41,8 @@ pub struct Core {
     pub cpsr: RegPSR,
     pub spsr: [RegPSR; 5],
 
+    pub bs: BarrelShifter,
+
     pipeline_state: PipelineState,
     fetched_arm: u32,
     decoded_arm: u32,
@@ -125,12 +127,11 @@ impl Core {
     }
 
     pub fn ror(&mut self, value: u32, rotation: u32) -> u32 {
-        let mut carry = false; // we don't need to update the carry flag
-        self.barrel_shift(
+        self.bs.op(
             value as i32,
             rotation,
             BarrelShiftOpCode::ROR,
-            &mut carry,
+            self.cpsr.C(),
             false,
         ) as u32
     }

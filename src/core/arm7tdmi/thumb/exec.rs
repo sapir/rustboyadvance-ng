@@ -27,6 +27,7 @@ impl Core {
                 ShiftedRegister::ByAmount(insn.offset5() as u8 as u32, insn.format1_op()),
             )
             .unwrap();
+        self.cpsr.set_C(self.bs.carry_out);
 
         let rd = insn.rd();
         let op1 = self.get_reg(rd) as i32;

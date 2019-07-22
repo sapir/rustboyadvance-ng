@@ -124,11 +124,12 @@ impl Core {
     }
 
     fn decode_operand2(&mut self, op2: BarrelShifterValue, set_flags: bool) -> CpuResult<u32> {
+        let mut carry = self.cpsr.C();
         match op2 {
             BarrelShifterValue::RotatedImmediate(imm, r) => {
                 let result = imm.rotate_right(r);
                 if set_flags {
-                    self.cpsr.set_C((result as u32).bit(31));
+                    self.cpsr.set_C((result as u32).bit(31)); // TODO move to barrel shifter carry out
                 }
                 Ok(result)
             }
@@ -140,6 +141,9 @@ impl Core {
                 // +1I
                 self.add_cycle();
                 let result = self.register_shift(reg, shift)?;
+                if set_flags {
+                    self.cpsr.set_C(self.bs.carry_out);
+                }
                 Ok(result as u32)
             }
             _ => unreachable!(),
@@ -251,7 +255,7 @@ impl Core {
             if insn.transfer_size() == 1 {
                 self.store_8(addr, value as u8, bus);
             } else {
-                self.store_32(addr, value, bus);
+                self.store_32(addr & !0x3, value, bus);
             };
         }
 
