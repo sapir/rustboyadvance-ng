@@ -127,10 +127,10 @@ impl Core {
     }
 
     pub fn ror(&mut self, value: u32, rotation: u32) -> u32 {
-        self.bs.op(
+        self.bs.barrel_shift_op(
+            BarrelShiftOpCode::ROR,
             value as i32,
             rotation,
-            BarrelShiftOpCode::ROR,
             self.cpsr.C(),
             false,
         ) as u32

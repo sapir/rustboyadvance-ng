@@ -57,33 +57,24 @@ pub enum BarrelShiftOpCode {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum ShiftedRegister {
-    ByAmount(u32, BarrelShiftOpCode),
-    ByRegister(usize, BarrelShiftOpCode),
+pub enum ShiftRegisterBy {
+    ByAmount(u32),
+    ByRegister(usize),
 }
 
-impl From<u32> for ShiftedRegister {
-    fn from(v: u32) -> ShiftedRegister {
-        let typ = BarrelShiftOpCode::from_u8(v.bit_range(5..7) as u8).unwrap();
-        if v.bit(4) {
-            let rs = v.bit_range(8..12) as usize;
-            ShiftedRegister::ByRegister(rs, typ)
-        } else {
-            let amount = v.bit_range(7..12) as u32;
-            ShiftedRegister::ByAmount(amount, typ)
-        }
-    }
+#[derive(Debug, PartialEq)]
+pub struct ShiftedRegister {
+    pub reg: usize,
+    pub shift_by: ShiftRegisterBy,
+    pub bs_op: BarrelShiftOpCode,
+    pub added: Option<bool>,
 }
 
 #[derive(Debug, PartialEq)]
 pub enum BarrelShifterValue {
     ImmediateValue(i32),
     RotatedImmediate(u32, u32),
-    ShiftedRegister {
-        reg: usize,
-        shift: ShiftedRegister,
-        added: Option<bool>,
-    },
+    ShiftedRegister(ShiftedRegister),
 }
 
 impl BarrelShifterValue {
@@ -103,12 +94,12 @@ pub struct BarrelShifter {
 
 impl BarrelShifter {
     /// Performs a generic barrel shifter operation
-    pub fn op(
+    pub fn barrel_shift_op(
         &mut self,
+        shift: BarrelShiftOpCode,
         val: i32,
         amount: u32,
-        shift: BarrelShiftOpCode,
-        carry_flag: bool,
+        carry_in: bool,
         immediate: bool,
     ) -> i32 {
         //
@@ -132,7 +123,10 @@ impl BarrelShifter {
         //
         match shift {
             BarrelShiftOpCode::LSL => match amount {
-                0 => val,
+                0 => {
+                    self.carry_out = carry_in;
+                    val
+                },
                 x if x < 32 => {
                     self.carry_out = val.wrapping_shr(32 - x) & 1 == 1;
                     val << x
@@ -197,7 +191,7 @@ impl BarrelShifter {
                     0 => {
                         if immediate {
                             /* RRX */
-                            let old_c = carry_flag as i32;
+                            let old_c = carry_in as i32;
                             self.carry_out = val & 0b1 != 0;
                             ((val as u32) >> 1) as i32 | (old_c << 31)
                         } else {
@@ -221,21 +215,25 @@ impl BarrelShifter {
 }
 
 impl Core {
-    pub fn register_shift(&mut self, reg: usize, shift: ShiftedRegister) -> CpuResult<i32> {
-        let mut val = self.get_reg(reg) as i32;
+    pub fn register_shift(&mut self, shift: ShiftedRegister) -> CpuResult<i32> {
+        let mut val = self.get_reg(shift.reg) as i32;
         let carry = self.cpsr.C();
-        match shift {
-            ShiftedRegister::ByAmount(amount, shift) => {
-                let result = self.bs.op(val, amount, shift, carry, true);
+        match shift.shift_by {
+            ShiftRegisterBy::ByAmount(amount) => {
+                let result = self
+                    .bs
+                    .barrel_shift_op(shift.bs_op, val, amount, carry, true);
                 Ok(result)
             }
-            ShiftedRegister::ByRegister(rs, shift) => {
-                if reg == REG_PC {
+            ShiftRegisterBy::ByRegister(rs) => {
+                if shift.reg == REG_PC {
                     val = val + 4; // PC prefetching
                 }
                 if rs != REG_PC {
                     let amount = self.get_reg(rs) & 0xff;
-                    let result = self.bs.op(val, amount, shift, carry, false);
+                    let result = self
+                        .bs
+                        .barrel_shift_op(shift.bs_op, val, amount, carry, false);
                     Ok(result)
                 } else {
                     Err(CpuError::IllegalInstruction)
@@ -248,12 +246,9 @@ impl Core {
         // TODO decide if error handling or panic here
         match sval {
             BarrelShifterValue::ImmediateValue(offset) => offset,
-            BarrelShifterValue::ShiftedRegister {
-                reg,
-                shift,
-                added: Some(added),
-            } => {
-                let abs = self.register_shift(reg, shift).unwrap();
+            BarrelShifterValue::ShiftedRegister(shifted_reg) => {
+                let added = shifted_reg.added.unwrap_or(true);
+                let abs = self.register_shift(shifted_reg).unwrap();
                 if added {
                     abs
                 } else {
@@ -281,19 +276,31 @@ impl Core {
     }
 
     #[allow(non_snake_case)]
-    pub fn alu(
-        &mut self,
-        opcode: AluOpCode,
-        op1: i32,
-        op2: i32,
-        set_cond_flags: bool,
-    ) -> Option<i32> {
+    pub fn alu(&mut self, opcode: AluOpCode, op1: i32, op2: i32) -> i32 {
         use AluOpCode::*;
-        let mut carry = if set_cond_flags {
-            self.bs.carry_out
-        } else {
-            self.cpsr.C()
-        };
+        let C = self.cpsr.C() as i32;
+
+        match opcode {
+            AND => op1 & op2,
+            EOR => op1 ^ op2,
+            SUB => op1.wrapping_sub(op2),
+            RSB => op2.wrapping_sub(op1),
+            ADD => op1.wrapping_add(op2),
+            ADC => op1.wrapping_add(op2).wrapping_add(C),
+            SBC => op1.wrapping_sub(op2).wrapping_sub(1 - C),
+            RSC => op2.wrapping_sub(op1).wrapping_sub(1 - C),
+            ORR => op1 | op2,
+            MOV => op2,
+            BIC => op1 & (!op2),
+            MVN => !op2,
+            _ => panic!("{} should be a PSR transfer", opcode),
+        }
+    }
+
+    #[allow(non_snake_case)]
+    pub fn alu_flags(&mut self, opcode: AluOpCode, op1: i32, op2: i32) -> Option<i32> {
+        use AluOpCode::*;
+        let mut carry = self.bs.carry_out;
         let C = self.cpsr.C() as i32;
         let mut overflow = self.cpsr.V();
 
@@ -312,18 +319,17 @@ impl Core {
             MVN => !op2,
         };
 
-        if set_cond_flags {
-            self.cpsr.set_N(result < 0);
-            self.cpsr.set_Z(result == 0);
-            self.cpsr.set_C(carry);
-            if opcode.is_arithmetic() {
-                self.cpsr.set_V(overflow);
-            }
+        self.cpsr.set_N(result < 0);
+        self.cpsr.set_Z(result == 0);
+        self.cpsr.set_C(carry);
+        if opcode.is_arithmetic() {
+            self.cpsr.set_V(overflow);
         }
 
-        match opcode {
-            TST | TEQ | CMP | CMN => None,
-            _ => Some(result),
+        if opcode.is_setting_flags() {
+            None
+        } else {
+            Some(result)
         }
     }
 }

@@ -1,6 +1,6 @@
 use crate::bit::BitIndex;
 
-use crate::core::arm7tdmi::alu::*;
+use super::super::alu::*;
 use crate::core::arm7tdmi::bus::Bus;
 use crate::core::arm7tdmi::cpu::{Core, CpuExecResult};
 use crate::core::arm7tdmi::psr::RegPSR;
@@ -124,7 +124,6 @@ impl Core {
     }
 
     fn decode_operand2(&mut self, op2: BarrelShifterValue, set_flags: bool) -> CpuResult<u32> {
-        let mut carry = self.cpsr.C();
         match op2 {
             BarrelShifterValue::RotatedImmediate(imm, r) => {
                 let result = imm.rotate_right(r);
@@ -133,14 +132,10 @@ impl Core {
                 }
                 Ok(result)
             }
-            BarrelShifterValue::ShiftedRegister {
-                reg,
-                shift,
-                added: _,
-            } => {
+            BarrelShifterValue::ShiftedRegister(x) => {
                 // +1I
                 self.add_cycle();
-                let result = self.register_shift(reg, shift)?;
+                let result = self.register_shift(x)?;
                 if set_flags {
                     self.cpsr.set_C(self.bs.carry_out);
                 }
@@ -166,21 +161,19 @@ impl Core {
     /// Cycles: 1S+x+y (from GBATEK)
     ///         Add x=1I cycles if Op2 shifted-by-register. Add y=1S+1N cycles if Rd=R15.
     fn exec_data_processing(&mut self, _bus: &mut Bus, insn: ArmInstruction) -> CpuExecResult {
-        // TODO handle carry flag
-
         let op1 = if insn.rn() == REG_PC {
-            self.pc as i32 // prefething
+            self.pc as i32
         } else {
             self.get_reg(insn.rn()) as i32
         };
 
+        let s_flag = insn.set_cond_flag();
         let opcode = insn.opcode().unwrap();
 
-        let set_flags = opcode.is_setting_flags() || insn.set_cond_flag();
         let op2 = insn.operand2()?;
-        let op2 = self.decode_operand2(op2, set_flags)? as i32;
+        let op2 = self.decode_operand2(op2, s_flag)? as i32;
 
-        if !insn.set_cond_flag() {
+        if !s_flag {
             match opcode {
                 AluOpCode::TEQ | AluOpCode::CMN => {
                     return self.exec_msr(insn, op2 as u32);
@@ -192,7 +185,13 @@ impl Core {
 
         let rd = insn.rd();
 
-        if let Some(result) = self.alu(opcode, op1, op2, set_flags) {
+        let alu_res = if s_flag {
+            self.alu_flags(opcode, op1, op2)
+        } else {
+            Some(self.alu(opcode, op1, op2))
+        };
+
+        if let Some(result) = alu_res {
             if rd == REG_PC {
                 self.transfer_spsr_mode();
                 self.flush_pipeline();
