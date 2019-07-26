@@ -28,8 +28,8 @@ impl Core {
                 bs_op: insn.format1_op(),
                 added: None,
             })
-            .unwrap();
-        self.cpsr.set_C(self.bs.carry_out);
+            .unwrap() as i32;
+        self.cpsr.set_C(self.bs_carry_out);
 
         let rd = insn.rd();
         let op1 = self.get_reg(rd) as i32;

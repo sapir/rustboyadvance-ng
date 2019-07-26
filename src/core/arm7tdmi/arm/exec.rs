@@ -125,11 +125,8 @@ impl Core {
 
     fn decode_operand2(&mut self, op2: BarrelShifterValue, set_flags: bool) -> CpuResult<u32> {
         match op2 {
-            BarrelShifterValue::RotatedImmediate(imm, r) => {
-                let result = imm.rotate_right(r);
-                if set_flags {
-                    self.cpsr.set_C((result as u32).bit(31)); // TODO move to barrel shifter carry out
-                }
+            BarrelShifterValue::RotatedImmediate(val, amount) => {
+                let result = self.ror(val, amount, self.cpsr.C(), false , true);
                 Ok(result)
             }
             BarrelShifterValue::ShiftedRegister(x) => {
@@ -137,7 +134,7 @@ impl Core {
                 self.add_cycle();
                 let result = self.register_shift(x)?;
                 if set_flags {
-                    self.cpsr.set_C(self.bs.carry_out);
+                    self.cpsr.set_C(self.bs_carry_out);
                 }
                 Ok(result as u32)
             }
