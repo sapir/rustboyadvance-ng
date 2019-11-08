@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use super::arm7tdmi::{exception::Exception, Core, DecodedInstruction};
 use super::cartridge::Cartridge;
+use super::dma::DmaController;
 use super::gpu::*;
 use super::interrupt::*;
 use super::ioregs::IoRegs;
@@ -19,6 +20,7 @@ pub struct IoDevices {
     pub intc: InterruptController,
     pub gpu: Gpu,
     pub timers: Timers,
+    pub dmac: DmaController,
 }
 
 impl IoDevices {
@@ -27,6 +29,7 @@ impl IoDevices {
             intc: InterruptController::new(),
             gpu: Gpu::new(),
             timers: Timers::new(),
+            dmac: DmaController::new(),
         }
     }
 }
@@ -85,14 +88,41 @@ impl GameBoyAdvance {
 
     pub fn emulate_peripherals(&mut self, cycles: usize) {
         let mut irqs = IrqBitmask(0);
-        let mut io = self.io.borrow_mut();
 
-        io.timers.step(cycles, &mut self.sysbus, &mut irqs);
-        io.gpu.step(cycles, &mut self.sysbus, &mut irqs);
+        self.io
+            .borrow_mut()
+            .timers
+            .step(cycles, &mut self.sysbus, &mut irqs);
+
+        let prev_state = self.io.borrow().gpu.state;
+        self.io
+            .borrow_mut()
+            .gpu
+            .step(cycles, &mut self.sysbus, &mut irqs);
+        let new_state = self.io.borrow().gpu.state;
+        if new_state != prev_state {
+            match new_state {
+                GpuState::HBlank => self
+                    .io
+                    .borrow_mut()
+                    .dmac
+                    .notify_hblank(&mut self.sysbus, &mut irqs),
+                GpuState::VBlank => self
+                    .io
+                    .borrow_mut()
+                    .dmac
+                    .notify_vblank(&mut self.sysbus, &mut irqs),
+                _ => (),
+            }
+        }
+        self.io
+            .borrow_mut()
+            .dmac
+            .step(cycles, &mut self.sysbus, &mut irqs);
 
         if !self.cpu.cpsr.irq_disabled() {
-            io.intc.request_irqs(irqs);
-            if io.intc.irq_pending() {
+            self.io.borrow_mut().intc.request_irqs(irqs);
+            if self.io.borrow().intc.irq_pending() {
                 self.cpu.exception(&mut self.sysbus, Exception::Irq);
             }
         }
@@ -103,9 +133,11 @@ impl GameBoyAdvance {
         let executed_insn = self.cpu.step_one(&mut self.sysbus)?;
         let cycles = self.cpu.cycles - previous_cycles;
 
+        let prev_gpu_state = self.io.borrow().gpu.state;
         self.emulate_peripherals(cycles);
+        let new_gpu_state = self.io.borrow().gpu.state;
 
-        if self.io.borrow().gpu.state == GpuState::VBlank {
+        if new_gpu_state != prev_gpu_state && new_gpu_state == GpuState::VBlank {
             self.backend.render(self.io.borrow().gpu.get_framebuffer());
         }
 

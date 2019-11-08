@@ -128,6 +128,12 @@ pub mod consts {
 
 use consts::*;
 
+macro_rules! dma_chan {
+    ($reg:expr) => {
+        (($reg - REG_DMA_BASE) / 12) as usize
+    };
+}
+
 #[derive(Debug)]
 pub struct IoRegs {
     mem: BoxedMemory,
@@ -303,6 +309,41 @@ impl Bus for IoRegs {
             REG_TM3CNT_L => {
                 io.timers[3].timer_data = value;
                 io.timers[3].initial_data = value;
+            REG_DMA0CNT_H | REG_DMA1CNT_H | REG_DMA2CNT_H | REG_DMA3CNT_H => {
+                self.io
+                    .borrow_mut()
+                    .dmac
+                    .write_dma_ctrl(dma_chan!(addr + IO_BASE), value);
+            }
+            REG_DMA0CNT_L | REG_DMA1CNT_L | REG_DMA2CNT_L | REG_DMA3CNT_L => {
+                self.io
+                    .borrow_mut()
+                    .dmac
+                    .write_word_count(dma_chan!(addr + IO_BASE), value);
+            }
+            REG_DMA0SAD_L | REG_DMA1SAD_L | REG_DMA2SAD_L | REG_DMA3SAD_L => {
+                self.io
+                    .borrow_mut()
+                    .dmac
+                    .write_src_low(dma_chan!(addr + IO_BASE), value);
+            }
+            REG_DMA0SAD_H | REG_DMA1SAD_H | REG_DMA2SAD_H | REG_DMA3SAD_H => {
+                self.io
+                    .borrow_mut()
+                    .dmac
+                    .write_src_high(dma_chan!(addr + IO_BASE), value);
+            }
+            REG_DMA0DAD_L | REG_DMA1DAD_L | REG_DMA2DAD_L | REG_DMA3DAD_L => {
+                self.io
+                    .borrow_mut()
+                    .dmac
+                    .write_dst_low(dma_chan!(addr + IO_BASE), value);
+            }
+            REG_DMA0DAD_H | REG_DMA1DAD_H | REG_DMA2DAD_H | REG_DMA3DAD_H => {
+                self.io
+                    .borrow_mut()
+                    .dmac
+                    .write_dst_high(dma_chan!(addr + IO_BASE), value);
             }
             REG_TM3CNT_H => io.timers[3].timer_ctl.0 = value,
 
