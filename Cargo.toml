@@ -12,6 +12,7 @@ members = [
 ]
 
 [dependencies]
+lazy_static = "1.4.0"
 serde = {version = "1.0.104", features = ["derive"] }
 bincode = "1.2.1"
 byteorder = "1"
@@ -44,4 +45,7 @@ gdb = ["gdbstub"]
 
 [profile.dev]
 opt-level = 0
+debug = true
+
+[profile.release]
 debug = true

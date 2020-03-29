@@ -6,16 +6,19 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "debugger")]
 use std::fmt;
 
+use super::arm::{arm_insn_hash, ArmCond, ARM_LUT};
 pub use super::exception::Exception;
+use super::thumb::THUMB_LUT;
 use super::CpuAction;
 #[cfg(feature = "debugger")]
 use super::DecodedInstruction;
-use super::{
-    arm::*, psr::RegPSR, thumb::ThumbInstruction, Addr, CpuMode, CpuState, InstructionDecoder,
-};
+use super::{arm::*, psr::RegPSR, thumb::ThumbInstruction, Addr, CpuMode, CpuState};
 
 use crate::core::bus::Bus;
 use crate::core::sysbus::{MemoryAccessType::*, MemoryAccessWidth::*, SysBus};
+
+use bit::BitIndex;
+use num::FromPrimitive;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Core {
@@ -240,43 +243,37 @@ impl Core {
     #[allow(non_snake_case)]
     #[inline(always)]
     pub(super) fn S_cycle32(&mut self, sb: &SysBus, addr: u32) {
-        self.cycles += 1;
-        self.cycles += sb.get_cycles(addr, Seq + MemoryAccess32);
+        self.cycles += sb.get_cycles(addr, Seq, MemoryAccess32);
     }
 
     #[allow(non_snake_case)]
     #[inline(always)]
     pub(super) fn S_cycle16(&mut self, sb: &SysBus, addr: u32) {
-        self.cycles += 1;
-        self.cycles += sb.get_cycles(addr, Seq + MemoryAccess16);
+        self.cycles += sb.get_cycles(addr, Seq, MemoryAccess16);
     }
 
     #[allow(non_snake_case)]
     #[inline(always)]
     pub(super) fn S_cycle8(&mut self, sb: &SysBus, addr: u32) {
-        self.cycles += 1;
-        self.cycles += sb.get_cycles(addr, Seq + MemoryAccess8);
+        self.cycles += sb.get_cycles(addr, Seq, MemoryAccess8);
     }
 
     #[allow(non_snake_case)]
     #[inline(always)]
     pub(super) fn N_cycle32(&mut self, sb: &SysBus, addr: u32) {
-        self.cycles += 1;
-        self.cycles += sb.get_cycles(addr, NonSeq + MemoryAccess32);
+        self.cycles += sb.get_cycles(addr, NonSeq, MemoryAccess32);
     }
 
     #[allow(non_snake_case)]
     #[inline(always)]
     pub(super) fn N_cycle16(&mut self, sb: &SysBus, addr: u32) {
-        self.cycles += 1;
-        self.cycles += sb.get_cycles(addr, NonSeq + MemoryAccess16);
+        self.cycles += sb.get_cycles(addr, NonSeq, MemoryAccess16);
     }
 
     #[allow(non_snake_case)]
     #[inline(always)]
     pub(super) fn N_cycle8(&mut self, sb: &SysBus, addr: u32) {
-        self.cycles += 1;
-        self.cycles += sb.get_cycles(addr, NonSeq + MemoryAccess8);
+        self.cycles += sb.get_cycles(addr, NonSeq, MemoryAccess8);
     }
 
     #[inline]
@@ -302,13 +299,23 @@ impl Core {
     }
 
     fn step_arm_exec(&mut self, insn: u32, sb: &mut SysBus) {
-        let decoded_arm = ArmInstruction::decode(insn, self.pc.wrapping_sub(8));
+        let cond = ArmCond::from_u32(insn.bit_range(28..32)).expect("invalid arm condition");
+        if cond != ArmCond::AL {
+            if !self.check_arm_cond(cond) {
+                self.S_cycle32(sb, self.pc);
+                self.advance_arm();
+                return;
+            }
+        }
+
+        let arm_info = &ARM_LUT[arm_insn_hash(insn)];
+        let arm_insn = ArmInstruction::new(insn, self.pc.wrapping_sub(8), arm_info.fmt);
         #[cfg(feature = "debugger")]
         {
             self.gpr_previous = self.get_registers();
-            self.last_executed = Some(DecodedInstruction::Arm(decoded_arm.clone()));
+            self.last_executed = Some(DecodedInstruction::Arm(arm_insn.clone()));
         }
-        let result = self.exec_arm(sb, &decoded_arm);
+        let result = (arm_info.handler_fn)(self, sb, &arm_insn);
         match result {
             CpuAction::AdvancePC => self.advance_arm(),
             CpuAction::FlushPipeline => {}
@@ -316,13 +323,14 @@ impl Core {
     }
 
     fn step_thumb_exec(&mut self, insn: u16, sb: &mut SysBus) {
-        let decoded_thumb = ThumbInstruction::decode(insn, self.pc.wrapping_sub(4));
+        let thumb_info = &THUMB_LUT[(insn >> 6) as usize];
+        let thumb_insn = ThumbInstruction::new(insn, self.pc.wrapping_sub(4), thumb_info.fmt);
         #[cfg(feature = "debugger")]
         {
             self.gpr_previous = self.get_registers();
-            self.last_executed = Some(DecodedInstruction::Thumb(decoded_thumb.clone()));
+            self.last_executed = Some(DecodedInstruction::Thumb(thumb_insn.clone()));
         }
-        let result = self.exec_thumb(sb, &decoded_thumb);
+        let result = (thumb_info.handler_fn)(self, sb, &thumb_insn);
         match result {
             CpuAction::AdvancePC => self.advance_thumb(),
             CpuAction::FlushPipeline => {}
